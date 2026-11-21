@@ -1,0 +1,20 @@
+<launch>
+  <!-- 真实 UVC 相机模式：OpenCV 读相机 + 检测，不依赖 usb_cam -->
+  <arg name="device" default="/dev/video20"/>
+  <arg name="debug" default="true"/>
+
+  <node pkg="uav_vision" type="camera_publisher.py" name="camera_publisher" output="screen">
+    <param name="device" value="$(arg device)"/>
+    <param name="width" value="640"/>
+    <param name="height" value="480"/>
+    <param name="fps" value="15.0"/>
+  </node>
+
+  <node pkg="uav_vision" type="vision_node.py" name="vision_node" output="screen">
+    <rosparam command="load" file="$(find uav_vision)/config/vision.yaml"/>
+    <param name="debug" value="$(arg debug)"/>
+  </node>
+
+  <!-- 把检测结果打印到屏幕，方便单个串口终端查看 -->
+  <node pkg="uav_vision" type="info_logger.py" name="info_logger" output="screen"/>
+</launch>

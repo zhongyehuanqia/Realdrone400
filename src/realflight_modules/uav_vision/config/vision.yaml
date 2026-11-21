@@ -1,0 +1,39 @@
+# 先按真实相机画面修改这些基础项。
+image_topic: /camera/image_raw
+mission_state_topic: /mission/state
+rotate: 0
+flip_horizontal: false
+flip_vertical: false
+debug: false
+
+# 赛题图 2：平台中心是黑色双圆环 + 十字，不是红色。
+pattern_color: black
+
+# 黑色图案：CLAHE + 局部自适应阈值 + 连通域筛选。
+adaptive_block: 41
+adaptive_c: 7.0
+clahe_clip: 2.0
+min_area: 120.0
+min_side_px: 12
+max_side_ratio: 0.85
+aspect_min: 0.45
+aspect_max: 2.2
+extent_min: 0.08
+extent_max: 0.70
+
+# 兼容红色图案的备用参数；pattern_color: red 时生效。
+red_hue_ranges:
+  - [0, 90, 55, 10, 255, 255]
+  - [170, 90, 55, 179, 255, 255]
+min_outer_radius_px: 35
+max_outer_radius_px: 300
+pair_center_tolerance_ratio: 0.18
+expected_radius_ratio: 0.60
+radius_ratio_tolerance: 0.18
+
+# 稳定判定与降落建议。
+stable_frames: 8
+max_center_jump_px: 80
+landing_max_error_normalized: 0.08
+# 120~130 px 约对应 fx=520 时距离 1.0 m；必须用你自己的标定值复核。
+landing_min_outer_radius_px: 130

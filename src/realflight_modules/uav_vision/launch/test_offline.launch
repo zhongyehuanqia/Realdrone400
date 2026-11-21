@@ -1,0 +1,13 @@
+<launch>
+  <!-- 无需相机：循环发布测试图并跑检测，验证整条 ROS 链路 -->
+  <arg name="debug" default="true"/>
+  <arg name="rate" default="15.0"/>
+  <node pkg="uav_vision" type="image_publisher.py" name="image_publisher" output="screen">
+    <param name="image_path" value="$(find uav_vision)/images/test_pattern.png"/>
+    <param name="rate" value="$(arg rate)"/>
+  </node>
+  <node pkg="uav_vision" type="vision_node.py" name="vision_node" output="screen">
+    <rosparam command="load" file="$(find uav_vision)/config/vision.yaml"/>
+    <param name="debug" value="$(arg debug)"/>
+  </node>
+</launch>
