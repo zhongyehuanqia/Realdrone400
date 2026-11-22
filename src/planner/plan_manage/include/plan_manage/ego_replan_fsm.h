@@ -16,6 +16,7 @@
 #include <traj_utils/Bspline.h>
 #include <traj_utils/MultiBsplines.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <quadrotor_msgs/TakeoffLand.h>
 #include <traj_utils/DataDisp.h>
 #include <plan_manage/planner_manager.h>
 #include <traj_utils/planning_visualization.h>
@@ -46,6 +47,14 @@ namespace ego_planner
       PRESET_TARGET = 2,
       REFENCE_PATH = 3
     };
+    // Simulation only. Real flights take off and land in px4ctrl.
+    enum FLIGHT_PHASE
+    {
+      ON_GROUND,
+      TAKING_OFF,
+      CRUISING,
+      LANDING
+    };
 
     /* planning utils */
     EGOPlannerManager::Ptr planner_manager_;
@@ -62,6 +71,14 @@ namespace ego_planner
     double emergency_time_;
     bool flag_realworld_experiment_;
     bool enable_fail_safe_;
+    bool sim_auto_takeoff_;
+    bool auto_takeoff_pending_;
+    bool land_pending_;
+    double takeoff_height_;
+    double land_height_;
+    FLIGHT_PHASE flight_phase_;
+    ros::Time last_vertical_attempt_;
+    ros::Time vertical_ready_time_;
 
     /* planning data */
     bool have_trigger_, have_target_, have_odom_, have_new_target_, have_recv_pre_agent_;
@@ -82,7 +99,7 @@ namespace ego_planner
     /* ROS utils */
     ros::NodeHandle node_;
     ros::Timer exec_timer_, safety_timer_;
-    ros::Subscriber waypoint_sub_, odom_sub_, swarm_trajs_sub_, broadcast_bspline_sub_, trigger_sub_;
+    ros::Subscriber waypoint_sub_, odom_sub_, swarm_trajs_sub_, broadcast_bspline_sub_, trigger_sub_, takeoff_land_sub_;
     ros::Publisher replan_pub_, new_pub_, bspline_pub_, data_disp_pub_, swarm_trajs_pub_, broadcast_bspline_pub_;
 
     /* helper functions */
@@ -97,7 +114,10 @@ namespace ego_planner
     void printFSMExecState();
 
     void readGivenWps();
-    void planNextWaypoint(const Eigen::Vector3d next_wp);
+    bool planNextWaypoint(const Eigen::Vector3d next_wp);
+    bool startVerticalManeuver(double target_z, FLIGHT_PHASE phase);
+    void takeoffLandCallback(const quadrotor_msgs::TakeoffLandConstPtr &msg);
+    void finishVerticalManeuver();
     void getLocalTarget();
 
     /* ROS functions */

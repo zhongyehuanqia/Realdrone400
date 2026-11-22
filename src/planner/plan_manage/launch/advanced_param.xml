@@ -67,6 +67,9 @@
     <param name="fsm/emergency_time" value="1.0" type="double"/>
     <param name="fsm/realworld_experiment" value="false"/>
     <param name="fsm/fail_safe" value="true"/>
+    <param name="fsm/auto_takeoff" value="false"/>
+    <param name="fsm/takeoff_height" value="1.5"/>
+    <param name="fsm/land_height" value="0.1"/>
 
     <param name="fsm/waypoint_num" value="$(arg point_num)" type="int"/>
     <param name="fsm/waypoint0_x" value="$(arg point0_x)" type="double"/>

@@ -58,5 +58,15 @@ roslaunch uav_vision test_realcamera.launch
 ## 注意
 
 - 检测脚本依赖 `cv2` 与 `cv_bridge`，且 `import cv2` 必须在 `from cv_bridge import ...` **之前**。
-- `/mission/state` 必须由飞控或地面站发布；无人发布则状态恒为 `IDLE`，不会触发降落。
+- `/mission/state` 由本机的 `vision_servo` 发布。只开 `vision_node`、不开发布者时，状态保持 `IDLE`，降落建议不会变成 true。
 - 脚本需可执行权限：`chmod +x scripts/*.py`。
+
+## 接到这架飞机
+
+检测仍只看图。`vision_servo.py` 订阅 `/Odom_high_freq` 和 `/vision/target_error`，把画面误差变成 `/position_cmd`，并在视觉允许降落时停掉位置指令、再发 `/px4ctrl/takeoff_land`。
+
+姿态用的是已经去掉雷达 15 度安装角的机体系，所以水平速度沿机头和机尾，不沿雷达斜轴。
+
+下视相机默认画面上方对着机头：目标在画面右侧就往右飞，在画面下方就往机尾飞。方向反了改 `config/servo.yaml` 里的 `sign_ex`、`sign_ey`。
+
+起飞悬停后执行 `home_shfiles/start_vision.sh`。6 通道保持在轨迹跟踪用的指令模式。不要同时开 `start_planner.sh`，两边都会发 `/position_cmd`。

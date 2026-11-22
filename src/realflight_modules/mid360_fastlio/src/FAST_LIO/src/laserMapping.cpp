@@ -124,6 +124,16 @@ V3D euler_cur;
 V3D position_last(Zero3d);
 V3D Lidar_T_wrt_IMU(Zero3d);
 M3D Lidar_R_wrt_IMU(Eye3d);
+// Positive: lidar +X is tilted down from the aircraft +X. Applied only when publishing body attitude.
+double lidar_mount_pitch_deg = 15.0;
+Eigen::Quaterniond q_imu_to_body(Eigen::Quaterniond::Identity());
+
+Eigen::Quaterniond imuAttitudeToBody(const Eigen::Quaterniond &q_world_imu)
+{
+    Eigen::Quaterniond q_world_body = q_world_imu * q_imu_to_body;
+    q_world_body.normalize();
+    return q_world_body;
+}
 
 /*** EKF inputs and output ***/
 MeasureGroup Measures;
@@ -171,7 +181,8 @@ void fastPredictIMU(double t, V3D acc, V3D gyr)
     latest_acc_0 = acc;
     latest_gyr_0 = gyr;
     nav_msgs::Odometry odomHigh;
-    Eigen::Quaterniond quadrotor_Q = Eigen::Quaterniond(latest_Q);
+    Eigen::Quaterniond quadrotor_Q = imuAttitudeToBody(Eigen::Quaterniond(latest_Q));
+    V3D w_body = q_imu_to_body * (gyr - state_point.bg);
     odomHigh.header.stamp =ros::Time().fromSec(t);
     odomHigh.header.frame_id = "world";
     odomHigh.child_frame_id = "odom_imu";
@@ -185,9 +196,9 @@ void fastPredictIMU(double t, V3D acc, V3D gyr)
     odomHigh.twist.twist.linear.x = latest_V.x();
     odomHigh.twist.twist.linear.y = latest_V.y();
     odomHigh.twist.twist.linear.z = latest_V.z();
-    odomHigh.twist.twist.angular.x = gyr.x() - state_point.bg.x();
-    odomHigh.twist.twist.angular.y = gyr.y() - state_point.bg.y();
-    odomHigh.twist.twist.angular.z = gyr.z() - state_point.bg.z();
+    odomHigh.twist.twist.angular.x = w_body.x();
+    odomHigh.twist.twist.angular.y = w_body.y();
+    odomHigh.twist.twist.angular.z = w_body.z();
 
     odomHigh_speed.publish(odomHigh);    
 }
@@ -850,6 +861,12 @@ int main(int argc, char** argv)
     nh.param<int>("pcd_save/interval", pcd_save_interval, -1);
     nh.param<vector<double>>("mapping/extrinsic_T", extrinT, vector<double>());
     nh.param<vector<double>>("mapping/extrinsic_R", extrinR, vector<double>());
+    nh.param<double>("mapping/lidar_mount_pitch_deg", lidar_mount_pitch_deg, 15.0);
+    q_imu_to_body = Eigen::Quaterniond(Eigen::AngleAxisd(
+        -lidar_mount_pitch_deg * PI_M / 180.0, Eigen::Vector3d::UnitY()));
+    q_imu_to_body.normalize();
+    ROS_INFO("LiDAR mount pitch %.2f deg (positive = +X tilted down). Body attitude is compensated on output.",
+             lidar_mount_pitch_deg);
     cout<<"p_pre->lidar_type "<<p_pre->lidar_type<<endl;
     
     path.header.stamp    = ros::Time::now();
@@ -1020,10 +1037,12 @@ int main(int argc, char** argv)
             state_point = kf.get_x();
             euler_cur = SO3ToEuler(state_point.rot);
             pos_lid = state_point.pos + state_point.rot * state_point.offset_T_L_I;
-            geoQuat.x = state_point.rot.coeffs()[0];
-            geoQuat.y = state_point.rot.coeffs()[1];
-            geoQuat.z = state_point.rot.coeffs()[2];
-            geoQuat.w = state_point.rot.coeffs()[3];
+            Eigen::Quaterniond q_body = imuAttitudeToBody(
+                Eigen::Quaterniond(state_point.rot.toRotationMatrix()));
+            geoQuat.x = q_body.x();
+            geoQuat.y = q_body.y();
+            geoQuat.z = q_body.z();
+            geoQuat.w = q_body.w();
 
             double t_update_end = omp_get_wtime();
 

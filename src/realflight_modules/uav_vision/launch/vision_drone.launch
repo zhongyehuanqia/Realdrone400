@@ -1,0 +1,14 @@
+<launch>
+  <!-- 本机：UVC 检测 + 把误差交给 px4ctrl。不要和 ego-planner 同时开。 -->
+  <arg name="device" default="/dev/video20"/>
+  <arg name="debug" default="false"/>
+
+  <include file="$(find uav_vision)/launch/test_realcamera.launch">
+    <arg name="device" value="$(arg device)"/>
+    <arg name="debug" value="$(arg debug)"/>
+  </include>
+
+  <node pkg="uav_vision" type="vision_servo.py" name="vision_servo" output="screen">
+    <rosparam command="load" file="$(find uav_vision)/config/servo.yaml"/>
+  </node>
+</launch>

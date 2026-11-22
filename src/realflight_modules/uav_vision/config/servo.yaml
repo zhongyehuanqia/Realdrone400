@@ -1,0 +1,30 @@
+# 视觉误差接到本机 px4ctrl。检测参数仍在 vision.yaml。
+
+odom_topic: /Odom_high_freq
+error_topic: /vision/target_error
+land_topic: /vision/landing_recommendation
+mission_topic: /mission/state
+cmd_topic: /position_cmd
+takeoff_land_topic: /px4ctrl/takeoff_land
+
+# 低于这个高度只搜索，不抢位置控制。单位米。
+search_height: 0.8
+# 归一化误差每 1.0 对应的水平速度，以及速度上限。单位米/秒。
+kp: 0.5
+max_speed: 0.35
+deadzone: 0.02
+# 位置指令相对当前里程计的最大拉偏，避免丢目标后猛拉。单位米。
+max_leash: 0.6
+
+# 下视、画面上方朝机头：ex>0 在画面右侧，应向机身右侧飞（机体 y 为负）。
+sign_ex: -1.0
+# ey>0 在画面下方，应向机尾飞（机体 x 为负）。
+sign_ey: -1.0
+
+error_timeout: 0.4
+# 误差小于该值并保持一段时间后，才把任务切到 LAND，让视觉开始判降落。
+align_error: 0.08
+align_hold_sec: 1.0
+# 必须长于 px4ctrl 的 msg_timeout/cmd（0.5 秒）。停发位置指令后，飞控才会回到悬停并接受降落。
+cmd_stop_sec: 0.7
+publish_rate: 20.0

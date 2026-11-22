@@ -23,6 +23,14 @@ namespace ego_planner
     nh.param("fsm/fail_safe", enable_fail_safe_, true);
 
     have_trigger_ = !flag_realworld_experiment_;
+    nh.param("fsm/auto_takeoff", sim_auto_takeoff_, true);
+    nh.param("fsm/takeoff_height", takeoff_height_, 1.5);
+    nh.param("fsm/land_height", land_height_, 0.1);
+    flight_phase_ = ON_GROUND;
+    auto_takeoff_pending_ = !flag_realworld_experiment_ && sim_auto_takeoff_;
+    land_pending_ = false;
+    last_vertical_attempt_ = ros::Time(0);
+    vertical_ready_time_ = ros::Time(0);
 
     nh.param("fsm/waypoint_num", waypoint_num_, -1);
     for (int i = 0; i < waypoint_num_; i++)
@@ -62,6 +70,12 @@ namespace ego_planner
     if (target_type_ == TARGET_TYPE::MANUAL_TARGET)
     {
       waypoint_sub_ = nh.subscribe("/move_base_simple/goal", 1, &EGOReplanFSM::waypointCallback, this);
+      if (!flag_realworld_experiment_)
+      {
+        takeoff_land_sub_ = nh.subscribe("/px4ctrl/takeoff_land", 1, &EGOReplanFSM::takeoffLandCallback, this);
+        ROS_INFO("Sim takeoff/land on /px4ctrl/takeoff_land. Auto takeoff=%s, height=%.2f m, land=%.2f m.",
+                 auto_takeoff_pending_ ? "true" : "false", takeoff_height_, land_height_);
+      }
     }
     else if (target_type_ == TARGET_TYPE::PRESET_TARGET)
     {
@@ -155,7 +169,7 @@ namespace ego_planner
     // }
   }
 
-  void EGOReplanFSM::planNextWaypoint(const Eigen::Vector3d next_wp)
+  bool EGOReplanFSM::planNextWaypoint(const Eigen::Vector3d next_wp)
   {
     bool success = false;
     success = planner_manager_->planGlobalTraj(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), next_wp, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
@@ -194,10 +208,78 @@ namespace ego_planner
 
       // visualization_->displayGoalPoint(end_pt_, Eigen::Vector4d(1, 0, 0, 1), 0.3, 0);
       visualization_->displayGlobalPathList(gloabl_traj, 0.1, 0);
+      return true;
     }
     else
     {
       ROS_ERROR("Unable to generate global trajectory!");
+      return false;
+    }
+  }
+
+  bool EGOReplanFSM::startVerticalManeuver(double target_z, FLIGHT_PHASE phase)
+  {
+    if (!have_odom_)
+      return false;
+    if ((ros::Time::now() - last_vertical_attempt_).toSec() < 0.5)
+      return false;
+
+    last_vertical_attempt_ = ros::Time::now();
+    FLIGHT_PHASE previous = flight_phase_;
+    flight_phase_ = phase;
+    Eigen::Vector3d wp(odom_pos_(0), odom_pos_(1), target_z);
+    if (!planNextWaypoint(wp))
+    {
+      flight_phase_ = previous;
+      return false;
+    }
+    return true;
+  }
+
+  void EGOReplanFSM::finishVerticalManeuver()
+  {
+    if (flag_realworld_experiment_)
+      return;
+
+    if (flight_phase_ == TAKING_OFF)
+    {
+      flight_phase_ = CRUISING;
+      ROS_INFO("\033[32mTakeoff finished. Hover at %.2f m, waiting for a goal.\033[32m", odom_pos_(2));
+    }
+    else if (flight_phase_ == LANDING)
+    {
+      flight_phase_ = ON_GROUND;
+      auto_takeoff_pending_ = false;
+      ROS_INFO("\033[32mLanded at z=%.2f m.\033[32m", odom_pos_(2));
+    }
+  }
+
+  void EGOReplanFSM::takeoffLandCallback(const quadrotor_msgs::TakeoffLandConstPtr &msg)
+  {
+    if (flag_realworld_experiment_ || target_type_ != TARGET_TYPE::MANUAL_TARGET)
+      return;
+
+    if (msg->takeoff_land_cmd == quadrotor_msgs::TakeoffLand::TAKEOFF)
+    {
+      if (flight_phase_ != ON_GROUND)
+      {
+        ROS_WARN("Ignore takeoff: drone is not on the ground.");
+        return;
+      }
+      auto_takeoff_pending_ = true;
+      ROS_INFO("Takeoff command received.");
+    }
+    else if (msg->takeoff_land_cmd == quadrotor_msgs::TakeoffLand::LAND)
+    {
+      if (flight_phase_ == ON_GROUND || flight_phase_ == LANDING)
+      {
+        ROS_WARN("Ignore land: drone is already landing or on the ground.");
+        return;
+      }
+      land_pending_ = true;
+      ROS_INFO("Land command received. Descending to %.2f m.", land_height_);
+      if (flight_phase_ == CRUISING && startVerticalManeuver(land_height_, LANDING))
+        land_pending_ = false;
     }
   }
 
@@ -213,11 +295,17 @@ namespace ego_planner
     if (msg->pose.position.z < -0.1)
       return;
 
+    if (!flag_realworld_experiment_ && flight_phase_ != CRUISING)
+    {
+      ROS_WARN("Reject goal. Take off and finish hovering before sending a navigation goal.");
+      return;
+    }
+
     cout << "Triggered!" << endl;
     // trigger_ = true;
     init_pt_ = odom_pos_;
 
-    Eigen::Vector3d end_wp(msg->pose.position.x, msg->pose.position.y, 1.5);
+    Eigen::Vector3d end_wp(msg->pose.position.x, msg->pose.position.y, takeoff_height_);
 
     planNextWaypoint(end_wp);
   }
@@ -459,6 +547,33 @@ namespace ego_planner
 
     case WAIT_TARGET:
     {
+      if (!flag_realworld_experiment_ &&
+          target_type_ == TARGET_TYPE::MANUAL_TARGET &&
+          have_odom_)
+      {
+        if (vertical_ready_time_.isZero())
+          vertical_ready_time_ = ros::Time::now() + ros::Duration(2.0);
+
+        if (land_pending_ && flight_phase_ == CRUISING &&
+            startVerticalManeuver(land_height_, LANDING))
+        {
+          land_pending_ = false;
+          ROS_INFO("Landing to %.2f m.", land_height_);
+          break;
+        }
+
+        if (flight_phase_ == ON_GROUND &&
+            auto_takeoff_pending_ &&
+            !land_pending_ &&
+            ros::Time::now() >= vertical_ready_time_ &&
+            startVerticalManeuver(takeoff_height_, TAKING_OFF))
+        {
+          auto_takeoff_pending_ = false;
+          ROS_INFO("Auto takeoff to %.2f m.", takeoff_height_);
+          break;
+        }
+      }
+
       if (!have_target_ || !have_trigger_)
         goto force_return;
       // return;
@@ -564,8 +679,30 @@ namespace ego_planner
       {
         if (t_cur > info->duration_ - 1e-2)
         {
+          if (!flag_realworld_experiment_ &&
+              (flight_phase_ == TAKING_OFF || flight_phase_ == LANDING) &&
+              std::fabs(odom_pos_(2) - end_pt_(2)) > 0.25)
+          {
+            ROS_WARN("Vertical maneuver not tracked (z=%.2f, target=%.2f). Retry.",
+                     odom_pos_(2), end_pt_(2));
+            have_target_ = false;
+            if (flight_phase_ == TAKING_OFF)
+            {
+              flight_phase_ = ON_GROUND;
+              auto_takeoff_pending_ = true;
+            }
+            else
+            {
+              flight_phase_ = CRUISING;
+              land_pending_ = true;
+            }
+            changeFSMExecState(WAIT_TARGET, "FSM");
+            goto force_return;
+          }
+
           have_target_ = false;
           have_trigger_ = false;
+          finishVerticalManeuver();
 
           if (target_type_ == TARGET_TYPE::PRESET_TARGET)
           {
